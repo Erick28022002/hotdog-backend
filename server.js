@@ -29,7 +29,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY || 'sb_publishable_5cEosCpGfTIM-culYQ1ofA_xggsaIBc'
 );
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (req, res) => res.json({ ok: true, version: 2 }));
 
 app.post('/api/pay', async (req, res) => {
   try {
