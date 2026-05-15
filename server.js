@@ -17,6 +17,8 @@ app.use(cors({
   ]
 }));
 
+const LOCATION_ID = process.env.SQUARE_LOCATION_ID || 'LT874YA53K13J';
+
 const squareClient = new SquareClient({
   token: process.env.SQUARE_ACCESS_TOKEN || 'EAAAl1FkkZdprJZ4zVL-sHWvMbPOV4xWgqOLxFfAW6aRf_1hzoFQF0_Aq1yOVPfo',
   environment: SquareEnvironment.Sandbox
@@ -36,18 +38,44 @@ app.post('/api/pay', async (req, res) => {
 
     const amountCents = Math.round(parseFloat(amount) * 100);
 
-    const response = await squareClient.payments.create({
+    // Crear orden en Square con los artículos
+    const orderResponse = await squareClient.orders.create({
+      order: {
+        locationId: LOCATION_ID,
+        lineItems: (items || []).map(item => ({
+          name: item.name,
+          quantity: String(item.qty || 1),
+          basePriceMoney: {
+            amount: BigInt(Math.round(parseFloat(item.price) * 100)),
+            currency: 'USD'
+          }
+        })),
+        metadata: {
+          customer_name: customer?.name || '',
+          customer_phone: customer?.phone || '',
+          order_type: orderType || 'pickup',
+          notes: notes || ''
+        }
+      },
+      idempotencyKey: crypto.randomUUID()
+    });
+
+    const orderId = orderResponse?.order?.id || orderResponse?.result?.order?.id;
+
+    // Procesar pago vinculado a la orden
+    const payResponse = await squareClient.payments.create({
       sourceId,
       idempotencyKey: crypto.randomUUID(),
       amountMoney: { amount: BigInt(amountCents), currency: 'USD' },
-      locationId: process.env.SQUARE_LOCATION_ID || 'LT874YA53K13J'
+      locationId: LOCATION_ID,
+      orderId
     });
 
-    const payment = response?.payment || response?.result?.payment || response;
+    const payment = payResponse?.payment || payResponse?.result?.payment || payResponse;
     const paymentId = payment?.id?.toString() || '';
     const receiptUrl = payment?.receiptUrl?.toString() || '';
 
-    // Guardar pedido en Supabase
+    // Guardar en Supabase
     await supabase.from('web_orders').insert({
       customer_name: customer?.name || '',
       customer_phone: customer?.phone || '',
@@ -65,7 +93,7 @@ app.post('/api/pay', async (req, res) => {
     res.json({ success: true, paymentId, receiptUrl });
   } catch (err) {
     const errMsg = err?.errors?.[0]?.detail || err?.message || JSON.stringify(err);
-    console.error('Error Square:', errMsg);
+    console.error('Error:', errMsg);
     res.status(400).json({ success: false, message: errMsg });
   }
 });
