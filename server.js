@@ -17,11 +17,11 @@ app.use(cors({
   ]
 }));
 
-const LOCATION_ID = process.env.SQUARE_LOCATION_ID || 'LT874YA53K13J';
+const LOCATION_ID = process.env.SQUARE_LOCATION_ID;
 
 const squareClient = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN || 'EAAAl1FkkZdprJZ4zVL-sHWvMbPOV4xWgqOLxFfAW6aRf_1hzoFQF0_Aq1yOVPfo',
-  environment: SquareEnvironment.Sandbox
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: process.env.SQUARE_ENV === 'production' ? SquareEnvironment.Production : SquareEnvironment.Sandbox
 });
 
 const supabase = createClient(
