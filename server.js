@@ -93,7 +93,8 @@ app.post('/api/pay', async (req, res) => {
     res.json({ success: true, paymentId, receiptUrl });
   } catch (err) {
     const errMsg = err?.errors?.[0]?.detail || err?.message || JSON.stringify(err);
-    console.error('Error:', errMsg);
+    console.error('Error completo:', JSON.stringify(err?.errors || err?.message || err));
+    console.error('ENV:', process.env.SQUARE_ENV, '| LOC:', process.env.SQUARE_LOCATION_ID);
     res.status(400).json({ success: false, message: errMsg });
   }
 });
