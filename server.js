@@ -29,7 +29,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY || 'sb_publishable_5cEosCpGfTIM-culYQ1ofA_xggsaIBc'
 );
 
-app.get('/health', (req, res) => res.json({ ok: true, version: 2 }));
+app.get('/health', (req, res) => res.json({ ok: true, version: 3 }));
 
 app.post('/api/pay', async (req, res) => {
   try {
@@ -37,14 +37,33 @@ app.post('/api/pay', async (req, res) => {
     if (!sourceId || !amount) return res.status(400).json({ success: false, error: 'Faltan datos' });
 
     const amountCents = Math.round(parseFloat(amount) * 100);
-    console.log('Intentando pago:', amountCents, 'env:', process.env.SQUARE_ENV, 'loc:', LOCATION_ID);
 
-    // Pago directo sin orden
+    // Crear orden en Square con los artículos
+    const orderResponse = await squareClient.orders.create({
+      order: {
+        locationId: LOCATION_ID,
+        lineItems: (items || []).map(item => ({
+          name: item.name,
+          quantity: String(item.qty || 1),
+          basePriceMoney: {
+            amount: BigInt(Math.round(parseFloat(item.price) * 100)),
+            currency: 'USD'
+          }
+        }))
+      },
+      idempotencyKey: crypto.randomUUID()
+    });
+
+    const orderId = orderResponse?.order?.id || orderResponse?.result?.order?.id;
+
+    // Procesar pago vinculado a la orden
     const payResponse = await squareClient.payments.create({
       sourceId,
       idempotencyKey: crypto.randomUUID(),
       amountMoney: { amount: BigInt(amountCents), currency: 'USD' },
-      locationId: LOCATION_ID
+      locationId: LOCATION_ID,
+      orderId,
+      note: `${customer?.name || ''} | ${orderType || 'pickup'} | ${notes || ''}`
     });
 
     const payment = payResponse?.payment || payResponse?.result?.payment || payResponse;
@@ -69,8 +88,7 @@ app.post('/api/pay', async (req, res) => {
     res.json({ success: true, paymentId, receiptUrl });
   } catch (err) {
     const errMsg = err?.errors?.[0]?.detail || err?.message || JSON.stringify(err);
-    console.error('Error completo:', JSON.stringify(err?.errors || err?.message || err));
-    console.error('ENV:', process.env.SQUARE_ENV, '| LOC:', process.env.SQUARE_LOCATION_ID);
+    console.error('Error:', errMsg);
     res.status(400).json({ success: false, message: errMsg });
   }
 });
