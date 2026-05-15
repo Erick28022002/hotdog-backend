@@ -37,38 +37,14 @@ app.post('/api/pay', async (req, res) => {
     if (!sourceId || !amount) return res.status(400).json({ success: false, error: 'Faltan datos' });
 
     const amountCents = Math.round(parseFloat(amount) * 100);
+    console.log('Intentando pago:', amountCents, 'env:', process.env.SQUARE_ENV, 'loc:', LOCATION_ID);
 
-    // Crear orden en Square con los artículos
-    const orderResponse = await squareClient.orders.create({
-      order: {
-        locationId: LOCATION_ID,
-        lineItems: (items || []).map(item => ({
-          name: item.name,
-          quantity: String(item.qty || 1),
-          basePriceMoney: {
-            amount: BigInt(Math.round(parseFloat(item.price) * 100)),
-            currency: 'USD'
-          }
-        })),
-        metadata: {
-          customer_name: customer?.name || '',
-          customer_phone: customer?.phone || '',
-          order_type: orderType || 'pickup',
-          notes: notes || ''
-        }
-      },
-      idempotencyKey: crypto.randomUUID()
-    });
-
-    const orderId = orderResponse?.order?.id || orderResponse?.result?.order?.id;
-
-    // Procesar pago vinculado a la orden
+    // Pago directo sin orden
     const payResponse = await squareClient.payments.create({
       sourceId,
       idempotencyKey: crypto.randomUUID(),
       amountMoney: { amount: BigInt(amountCents), currency: 'USD' },
-      locationId: LOCATION_ID,
-      orderId
+      locationId: LOCATION_ID
     });
 
     const payment = payResponse?.payment || payResponse?.result?.payment || payResponse;
