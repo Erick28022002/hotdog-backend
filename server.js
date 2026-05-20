@@ -53,6 +53,7 @@ app.post('/api/pay', async (req, res) => {
     const orderResponse = await squareClient.orders.create({
       order: {
         locationId: LOCATION_ID,
+        referenceId: 'web-order',
         lineItems: (items || []).map(item => ({
           name: item.name,
           quantity: String(item.qty || 1),
@@ -105,13 +106,12 @@ app.post('/api/pay', async (req, res) => {
   }
 });
 
-// Webhook de Square — recibe pagos del POS y los manda al KDS via Supabase
+// Webhook de Square — recibe eventos del POS y los manda al KDS via Supabase
 app.post('/webhook/square', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
     const rawBody = req.body.toString('utf8');
     const sigKey  = process.env.SQUARE_WEBHOOK_KEY;
 
-    // Verificar firma si está configurada
     if (sigKey) {
       const signature  = req.headers['x-square-hmacsha256-signature'];
       const webhookUrl = 'https://hotdog-backend.vercel.app/webhook/square';
@@ -120,17 +120,21 @@ app.post('/webhook/square', express.raw({ type: 'application/json' }), async (re
     }
 
     const event = JSON.parse(rawBody);
-    if (event.type !== 'payment.created') return res.json({ ok: true });
 
-    const payment = event.data?.object?.payment;
-    if (!payment) return res.json({ ok: true });
+    // Pedido creado en POS — aparece en KDS inmediatamente sin necesidad de pago
+    if (event.type === 'order.created') {
+      const orderId = event.data?.object?.order_created?.order_id;
+      if (!orderId) return res.json({ ok: true });
 
-    // Obtener los items del pedido si hay order_id
-    let lineItems = [];
-    if (payment.order_id) {
+      let lineItems = [], locationName = '';
       try {
-        const orderResp = await squareClient.orders.retrieve(payment.order_id);
+        const orderResp = await squareClient.orders.retrieve(orderId);
         const sqOrder   = orderResp?.order || orderResp?.result?.order;
+
+        // Ignorar pedidos creados desde la web (para no duplicar)
+        if (sqOrder?.referenceId === 'web-order') return res.json({ ok: true });
+
+        locationName = sqOrder?.locationId || '';
         lineItems = (sqOrder?.lineItems || []).map(li => ({
           name:  li.name,
           qty:   parseInt(li.quantity) || 1,
@@ -139,21 +143,43 @@ app.post('/webhook/square', express.raw({ type: 'application/json' }), async (re
       } catch (e) {
         console.error('Error fetching order:', e.message);
       }
+
+      await supabase.from('web_orders').insert({
+        customer_name: 'Mesa / POS',
+        customer_phone: '',
+        customer_email: '',
+        items: lineItems,
+        total: lineItems.reduce((s, i) => s + i.price * i.qty, 0),
+        payment_id: 'sq-order-' + orderId,
+        receipt_url: '',
+        order_type: 'pickup',
+        location: locationName,
+        notes: '',
+        status: 'pending'
+      });
+      return res.json({ ok: true });
     }
 
-    await supabase.from('web_orders').insert({
-      customer_name: 'Square POS',
-      customer_phone: '',
-      customer_email: '',
-      items: lineItems,
-      total: Number(payment.amount_money?.amount || 0) / 100,
-      payment_id: payment.id || '',
-      receipt_url: payment.receipt_url || '',
-      order_type: 'pickup',
-      location: '',
-      notes: payment.note || '',
-      status: 'pending'
-    });
+    // Pago recibido — actualiza el pedido existente a pagado
+    if (event.type === 'payment.created') {
+      const payment = event.data?.object?.payment;
+      if (!payment) return res.json({ ok: true });
+
+      if (payment.order_id) {
+        const { data: existing } = await supabase
+          .from('web_orders')
+          .select('id')
+          .eq('payment_id', 'sq-order-' + payment.order_id)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase.from('web_orders')
+            .update({ payment_id: payment.id, receipt_url: payment.receipt_url || '', status: 'paid' })
+            .eq('id', existing.id);
+        }
+      }
+      return res.json({ ok: true });
+    }
 
     res.json({ ok: true });
   } catch (err) {
