@@ -50,30 +50,12 @@ app.post('/api/pay', async (req, res) => {
 
     const amountCents = Math.round(parseFloat(amount) * 100);
 
-    const orderResponse = await squareClient.orders.create({
-      order: {
-        locationId: LOCATION_ID,
-        lineItems: (items || []).map(item => ({
-          name: item.name,
-          quantity: String(item.qty || 1),
-          basePriceMoney: {
-            amount: BigInt(Math.round(parseFloat(item.price) * 100)),
-            currency: 'USD'
-          }
-        }))
-      },
-      idempotencyKey: crypto.randomUUID()
-    });
-
-    const orderId = orderResponse?.order?.id || orderResponse?.result?.order?.id;
-
     const payResponse = await squareClient.payments.create({
       sourceId,
       idempotencyKey: crypto.randomUUID(),
       amountMoney: { amount: BigInt(amountCents), currency: 'USD' },
       locationId: LOCATION_ID,
-      orderId,
-      note: `${customer?.name || ''} | ${orderType || 'pickup'} | ${notes || ''}`
+      note: `${customer?.name || ''} | ${orderType || 'pickup'} | ${location || ''} | ${notes || ''}`
     });
 
     const payment = payResponse?.payment || payResponse?.result?.payment || payResponse;
