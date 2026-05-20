@@ -4,18 +4,23 @@ const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
 const crypto = require('crypto');
 
+const ALLOWED_ORIGINS = [
+  'https://erick28022002.github.io',
+  'https://Erick28022002.github.io',
+  'https://hotdogmaracay.com',
+  'http://hotdogmaracay.com',
+  'http://localhost:8080',
+  'http://192.168.1.113:8080'
+];
+
 const app = express();
-app.use(express.json());
 app.use(cors({
-  origin: [
-    'https://erick28022002.github.io',
-    'https://Erick28022002.github.io',
-    'https://hotdogmaracay.com',
-    'http://hotdogmaracay.com',
-    'http://localhost:8080',
-    'http://192.168.1.113:8080'
-  ]
+  origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin)),
+  methods: ['GET','POST','PATCH','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
 }));
+app.options('*', cors());
+app.use(express.json());
 
 const LOCATION_ID = process.env.SQUARE_LOCATION_ID;
 
@@ -91,6 +96,16 @@ app.post('/api/pay', async (req, res) => {
     console.error('Error:', errMsg);
     res.status(400).json({ success: false, message: errMsg });
   }
+});
+
+app.use((err, req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  const msg = err?.errors?.[0]?.detail || err?.message || 'Error interno';
+  console.error('Error:', msg);
+  res.status(500).json({ success: false, message: msg });
 });
 
 const PORT = process.env.PORT || 3001;
