@@ -105,6 +105,63 @@ app.post('/api/pay', async (req, res) => {
   }
 });
 
+// Webhook de Square — recibe pagos del POS y los manda al KDS via Supabase
+app.post('/webhook/square', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const rawBody = req.body.toString('utf8');
+    const sigKey  = process.env.SQUARE_WEBHOOK_KEY;
+
+    // Verificar firma si está configurada
+    if (sigKey) {
+      const signature  = req.headers['x-square-hmacsha256-signature'];
+      const webhookUrl = 'https://hotdog-backend.vercel.app/webhook/square';
+      const expected   = crypto.createHmac('sha256', sigKey).update(webhookUrl + rawBody).digest('base64');
+      if (signature !== expected) return res.status(403).json({ error: 'Invalid signature' });
+    }
+
+    const event = JSON.parse(rawBody);
+    if (event.type !== 'payment.created') return res.json({ ok: true });
+
+    const payment = event.data?.object?.payment;
+    if (!payment) return res.json({ ok: true });
+
+    // Obtener los items del pedido si hay order_id
+    let lineItems = [];
+    if (payment.order_id) {
+      try {
+        const orderResp = await squareClient.orders.retrieve(payment.order_id);
+        const sqOrder   = orderResp?.order || orderResp?.result?.order;
+        lineItems = (sqOrder?.lineItems || []).map(li => ({
+          name:  li.name,
+          qty:   parseInt(li.quantity) || 1,
+          price: li.basePriceMoney ? Number(li.basePriceMoney.amount) / 100 : 0
+        }));
+      } catch (e) {
+        console.error('Error fetching order:', e.message);
+      }
+    }
+
+    await supabase.from('web_orders').insert({
+      customer_name: 'Square POS',
+      customer_phone: '',
+      customer_email: '',
+      items: lineItems,
+      total: Number(payment.amount_money?.amount || 0) / 100,
+      payment_id: payment.id || '',
+      receipt_url: payment.receipt_url || '',
+      order_type: 'pickup',
+      location: '',
+      notes: payment.note || '',
+      status: 'pending'
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Webhook error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Local: node server.js | Vercel: exporta el app como serverless function
 if (require.main === module) {
   const PORT = process.env.PORT || 3001;
