@@ -1,7 +1,6 @@
 const express = require('express');
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
-const cors = require('cors');
 const crypto = require('crypto');
 
 const ALLOWED_ORIGINS = [
@@ -14,12 +13,20 @@ const ALLOWED_ORIGINS = [
 ];
 
 const app = express();
-app.use(cors({
-  origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin)),
-  methods: ['GET','POST','PATCH','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
-}));
-app.options('*', cors());
+
+// CORS manual — primer middleware, siempre se ejecuta incluso en errores
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
 app.use(express.json());
 
 const LOCATION_ID = process.env.SQUARE_LOCATION_ID;
@@ -34,7 +41,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY || 'sb_publishable_5cEosCpGfTIM-culYQ1ofA_xggsaIBc'
 );
 
-app.get('/health', (req, res) => res.json({ ok: true, version: 3 }));
+app.get('/health', (req, res) => res.json({ ok: true, version: 4 }));
 
 app.post('/api/pay', async (req, res) => {
   try {
@@ -43,7 +50,6 @@ app.post('/api/pay', async (req, res) => {
 
     const amountCents = Math.round(parseFloat(amount) * 100);
 
-    // Crear orden en Square con los artículos
     const orderResponse = await squareClient.orders.create({
       order: {
         locationId: LOCATION_ID,
@@ -61,7 +67,6 @@ app.post('/api/pay', async (req, res) => {
 
     const orderId = orderResponse?.order?.id || orderResponse?.result?.order?.id;
 
-    // Procesar pago vinculado a la orden
     const payResponse = await squareClient.payments.create({
       sourceId,
       idempotencyKey: crypto.randomUUID(),
@@ -75,7 +80,6 @@ app.post('/api/pay', async (req, res) => {
     const paymentId = payment?.id?.toString() || '';
     const receiptUrl = payment?.receiptUrl?.toString() || '';
 
-    // Guardar en Supabase
     await supabase.from('web_orders').insert({
       customer_name: customer?.name || '',
       customer_phone: customer?.phone || '',
@@ -93,20 +97,10 @@ app.post('/api/pay', async (req, res) => {
     res.json({ success: true, paymentId, receiptUrl });
   } catch (err) {
     const errMsg = err?.errors?.[0]?.detail || err?.message || JSON.stringify(err);
-    console.error('Error:', errMsg);
+    console.error('Error en /api/pay:', errMsg);
     res.status(400).json({ success: false, message: errMsg });
   }
 });
 
-app.use((err, req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  const msg = err?.errors?.[0]?.detail || err?.message || 'Error interno';
-  console.error('Error:', msg);
-  res.status(500).json({ success: false, message: msg });
-});
-
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Hotdog backend en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Hotdog backend v4 en puerto ${PORT}`));
