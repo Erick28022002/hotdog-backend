@@ -50,11 +50,32 @@ app.post('/api/pay', async (req, res) => {
 
     const amountCents = Math.round(parseFloat(amount) * 100);
 
+    const orderResponse = await squareClient.orders.create({
+      order: {
+        locationId: LOCATION_ID,
+        lineItems: (items || []).map(item => ({
+          name: item.name,
+          quantity: String(item.qty || 1),
+          basePriceMoney: {
+            amount: BigInt(Math.round(parseFloat(item.price || 0) * 100)),
+            currency: 'USD'
+          }
+        }))
+      },
+      idempotencyKey: crypto.randomUUID()
+    });
+
+    const order = orderResponse?.order || orderResponse?.result?.order;
+    const orderId = order?.id;
+    // Usar el total calculado por Square para evitar mismatch con impuestos
+    const orderTotal = order?.totalMoney?.amount ?? BigInt(amountCents);
+
     const payResponse = await squareClient.payments.create({
       sourceId,
       idempotencyKey: crypto.randomUUID(),
-      amountMoney: { amount: BigInt(amountCents), currency: 'USD' },
+      amountMoney: { amount: orderTotal, currency: 'USD' },
       locationId: LOCATION_ID,
+      orderId,
       note: `${customer?.name || ''} | ${orderType || 'pickup'} | ${location || ''} | ${notes || ''}`
     });
 
