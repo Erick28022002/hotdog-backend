@@ -102,5 +102,10 @@ app.post('/api/pay', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Hotdog backend v4 en puerto ${PORT}`));
+// Local: node server.js | Vercel: exporta el app como serverless function
+if (require.main === module) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`Hotdog backend v4 en puerto ${PORT}`));
+}
+
+module.exports = app;
